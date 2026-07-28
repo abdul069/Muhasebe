@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { upload } from "@vercel/blob/client";
+import { runClientOcr } from "@/lib/ocr-client";
 
 interface UserInfo {
   name: string;
@@ -71,6 +73,7 @@ export default function DashboardClient({ user }: { user: UserInfo }) {
   const [clientFilter, setClientFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState<string>("");
   const [message, setMessage] = useState<{
     type: "error" | "success" | "warning";
     text: string;
@@ -104,23 +107,67 @@ export default function DashboardClient({ user }: { user: UserInfo }) {
     if (!files || files.length === 0) return;
     setUploading(true);
     setMessage(null);
+    const list = Array.from(files);
     let ok = 0;
     let warn = 0;
-    for (const file of Array.from(files)) {
-      const fd = new FormData();
-      fd.append("file", file);
-      const res = await fetch("/api/receipts", { method: "POST", body: fd });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) {
-        ok++;
-        if (data.warning) warn++;
+    let failed = 0;
+
+    for (let i = 0; i < list.length; i++) {
+      const file = list[i];
+      const prefix = list.length > 1 ? `(${i + 1}/${list.length}) ` : "";
+      try {
+        // 1) OCR in de browser (client-side).
+        setUploadStatus(`${prefix}Metin okunuyor (OCR)…`);
+        let ocrText = "";
+        try {
+          ocrText = await runClientOcr(file, (p) =>
+            setUploadStatus(
+              `${prefix}Metin okunuyor (OCR)… %${Math.round(p * 100)}`
+            )
+          );
+        } catch {
+          ocrText = ""; // OCR mislukte; foto wordt toch bewaard
+        }
+
+        // 2) Foto rechtstreeks naar Vercel Blob uploaden.
+        setUploadStatus(`${prefix}Fotoğraf yükleniyor…`);
+        const blob = await upload(file.name, file, {
+          access: "public",
+          handleUploadUrl: "/api/receipts/blob-upload",
+          contentType: file.type || undefined,
+        });
+
+        // 3) Metadata naar de server sturen (server parseert de OCR-tekst).
+        setUploadStatus(`${prefix}Kaydediliyor…`);
+        const res = await fetch("/api/receipts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            imageUrl: blob.url,
+            mimeType: file.type || null,
+            originalName: file.name || null,
+            ocrText,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          ok++;
+          if (data.warning) warn++;
+        } else {
+          failed++;
+        }
+      } catch {
+        failed++;
       }
     }
+
     setUploading(false);
+    setUploadStatus("");
     if (fileRef.current) fileRef.current.value = "";
+
     if (ok > 0) {
       setMessage({
-        type: warn > 0 ? "warning" : "success",
+        type: warn > 0 || failed > 0 ? "warning" : "success",
         text:
           warn > 0
             ? `${ok} fiş yüklendi, ${warn} tanesi otomatik okunamadı — bilgileri elle girebilirsiniz.`
@@ -185,9 +232,15 @@ export default function DashboardClient({ user }: { user: UserInfo }) {
               <div className="icon">📸</div>
               <p>
                 {uploading
-                  ? "Yükleniyor ve okunuyor…"
+                  ? uploadStatus || "İşleniyor…"
                   : "Fotoğraf seçmek için tıklayın veya buraya sürükleyin"}
               </p>
+              {!uploading && (
+                <p className="muted" style={{ margin: "6px 0 0", fontSize: 13 }}>
+                  Metin okuma (OCR) tarayıcınızda çalışır; ilk seferde Türkçe dil
+                  dosyası indirilir.
+                </p>
+              )}
               <input
                 ref={fileRef}
                 type="file"

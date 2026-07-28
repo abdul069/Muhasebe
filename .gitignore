@@ -11,15 +11,11 @@ next-env.d.ts
 # production
 /build
 
-# database (SQLite) - lokaal, niet committen
+# lokale database-bestanden (indien van toepassing)
 /prisma/*.db
 /prisma/*.db-journal
 *.db
 *.db-journal
-
-# geuploade fis-fotos
-/uploads/*
-!/uploads/.gitkeep
 
 # env
 .env

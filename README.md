@@ -28,18 +28,25 @@ Elke bon — en zeker een **Z-raporu** (dagafsluiting) — wordt uitgesplitst pe
 
 ## Tech stack
 
-| Onderdeel   | Keuze                                          |
-| ----------- | ---------------------------------------------- |
-| Framework   | Next.js 14 (App Router) + TypeScript           |
-| Database    | Prisma + SQLite (MVP; makkelijk naar Postgres) |
-| Auth        | JWT-sessie in httpOnly-cookie (`jose`, bcrypt) |
-| OCR         | `tesseract.js` (lokaal, Turks taalpakket)      |
-| Excel       | `exceljs`                                       |
-| Opslag foto | lokale schijf (`./uploads`)                    |
+| Onderdeel   | Keuze                                              |
+| ----------- | -------------------------------------------------- |
+| Framework   | Next.js 14 (App Router) + TypeScript               |
+| Database    | Prisma + **PostgreSQL** (Vercel Postgres / Neon)   |
+| Auth        | JWT-sessie in httpOnly-cookie (`jose`, bcrypt)     |
+| OCR         | `tesseract.js` **client-side** (browser, Turks)    |
+| Excel       | `exceljs`                                           |
+| Opslag foto | **Vercel Blob** (directe client-upload)            |
+
+De OCR draait in de **browser van de klant**; de serverless-functie ontvangt
+alleen metadata (Blob-URL + herkende tekst) en parseert die. Zo zijn er geen
+server-time-outs en past de app op Vercel.
 
 ---
 
-## Snel starten
+## Snel starten (lokaal)
+
+Je hebt een Postgres-URL en een Vercel Blob-token nodig (beide gratis).
+De makkelijkste weg is het project in Vercel koppelen en dan `vercel env pull`.
 
 ```bash
 # 1. Dependencies installeren
@@ -47,9 +54,10 @@ npm install
 
 # 2. Environment instellen
 cp .env.example .env
-#   -> zet een sterke SESSION_SECRET (bv: openssl rand -base64 32)
+#   -> DATABASE_URL + DIRECT_URL (Postgres), BLOB_READ_WRITE_TOKEN, SESSION_SECRET
+#   of:  vercel link && vercel env pull .env
 
-# 3. Database aanmaken
+# 3. Databaseschema aanmaken
 npm run db:push
 
 # 4. (optioneel) demo-accounts aanmaken
@@ -81,7 +89,8 @@ Open daarna <http://localhost:3000>.
 - Logt in, gaat naar het dashboard.
 - Maakt/kiest een foto van een fiş (op mobiel opent direct de camera dankzij
   `capture="environment"`). Meerdere foto's tegelijk kan.
-- De foto wordt geüpload → OCR draait → velden worden automatisch ingevuld.
+- In de browser: OCR draait → foto gaat naar Blob → metadata naar de server →
+  velden worden automatisch ingevuld.
 - Ziet zijn eigen bonnen met status (İşlendi / Bekliyor / Okunamadı).
 
 ### Boekhouder (muhasebeci)
@@ -98,42 +107,64 @@ Open daarna <http://localhost:3000>.
 
 ```
 prisma/
-  schema.prisma        # datamodel (User, Receipt)
+  schema.prisma        # datamodel (User, Receipt, VatLine)
   seed.js              # demo-accounts
 src/
   lib/
     prisma.ts          # Prisma client
     session.ts         # JWT-sessies (cookie)
     auth.ts            # route-guards
-    ocr.ts             # Tesseract OCR
-    parse.ts           # Turkse bon-parser (TOPLAM / KDV / datum / bedrag)
-    storage.ts         # foto-opslag op schijf
+    ocr-client.ts      # Tesseract OCR in de browser (client-side)
+    parse.ts           # Turkse bon-parser (TOPLAM / KDV / datum / docType)
   middleware.ts        # beschermt /dashboard
   app/
     login/ register/   # auth-pagina's
     dashboard/         # hoofd-UI (klant + boekhouder) + bon-detail
     api/
       auth/            # register / login / logout
-      receipts/        # upload, lijst, detail, bewerken, verwijderen, foto
+      receipts/        # lijst, aanmaken, detail, bewerken, verwijderen, foto
+        blob-upload/   # token-endpoint voor directe Blob-upload
       clients/         # klantenlijst (boekhouder)
-      export/          # Excel-export
-uploads/               # geüploade foto's (niet in git)
+      export/          # Excel-export (+ blad KDV Dağılımı)
 ```
+
+---
+
+## Deploy naar Vercel
+
+1. **Push** deze repo naar GitHub en **importeer** hem in Vercel.
+2. In het Vercel-project → **Storage**:
+   - Maak een **Postgres**-database aan (koppelt automatisch
+     `POSTGRES_PRISMA_URL` en `POSTGRES_URL_NON_POOLING`).
+   - Maak een **Blob**-store aan (koppelt automatisch `BLOB_READ_WRITE_TOKEN`).
+3. Zet de **Environment Variables**:
+   - `DATABASE_URL` = de waarde van `POSTGRES_PRISMA_URL` (gepoold)
+   - `DIRECT_URL` = de waarde van `POSTGRES_URL_NON_POOLING`
+   - `SESSION_SECRET` = een sterke random string (`openssl rand -base64 32`)
+   - `NEXT_PUBLIC_OCR_LANGS` = `tur+eng` (optioneel)
+4. **Deploy.** Het `vercel-build`-script draait `prisma db push` en maakt de
+   tabellen aan bij de eerste build.
+5. **Demo-accounts** (eenmalig): `vercel env pull .env.local && npm run db:seed`,
+   of maak een boekhouder aan door in de database `role = 'ACCOUNTANT'` te zetten.
+
+> **Toegang tot foto's:** Vercel Blob-URL's zijn publiek maar onraadbaar. De
+> route `/api/receipts/:id/image` controleert eerst de login en stuurt dan door.
+> Voor strengere afscherming van financiële documenten kun je later overstappen
+> op private opslag of een proxy met korte-levensduur-URL's.
 
 ---
 
 ## OCR-opmerkingen
 
-- `tesseract.js` downloadt bij de **eerste** run de taalmodellen (`tur`, `eng`).
-  De server heeft daarvoor internettoegang nodig. Wil je volledig offline
-  draaien, host de `.traineddata`-bestanden lokaal en wijs `tesseract.js`
-  daarnaar.
-- De parser in `src/lib/parse.ts` doet een beste-gok op de belangrijkste
-  velden. OCR is nooit 100% — daarom kan de boekhouder elk veld corrigeren.
+- `tesseract.js` downloadt bij de **eerste** run in de browser de taalmodellen
+  (`tur`, `eng`). Daarna zit het in de browsercache.
+- De parser in `src/lib/parse.ts` doet een beste-gok op de belangrijkste velden
+  (incl. KDV-uitsplitsing en documenttype). OCR is nooit 100% — daarom kan de
+  boekhouder elk veld en elke KDV-regel corrigeren.
 
-## Productie / volgende stappen
+## Volgende stappen
 
-- Zet de database over naar **PostgreSQL** (provider in `schema.prisma`).
-- Sla foto's op in objectopslag (S3 / Supabase Storage) i.p.v. lokale schijf.
-- Voer OCR asynchroon uit (queue/worker) voor grote volumes.
-- Voeg een admin-scherm toe om klanten aan een boekhouder te koppelen.
+- Klanten aan een specifieke boekhouder/kantoor koppelen (multi-tenant).
+- Robuustere Z-raporu-parsing (matrah en KDV op aparte regels).
+- Private foto-opslag met tijdelijke URL's.
+- Automatische maand/kwartaal-export voor de btw-aangifte.

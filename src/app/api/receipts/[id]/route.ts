@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { promises as fs } from "fs";
+import { del } from "@vercel/blob";
 import { prisma } from "@/lib/prisma";
 import { requireUser, isAccountant } from "@/lib/auth";
-import { isInsideUploadDir } from "@/lib/storage";
 
 export const runtime = "nodejs";
 
@@ -133,9 +132,9 @@ export async function DELETE(
   if (existing === "forbidden")
     return NextResponse.json({ error: "Yetkiniz yok." }, { status: 403 });
 
-  // Verwijder de fysieke foto (best-effort).
-  if (existing.imagePath && isInsideUploadDir(existing.imagePath)) {
-    await fs.unlink(existing.imagePath).catch(() => {});
+  // Verwijder de foto uit Vercel Blob (best-effort).
+  if (existing.imageUrl) {
+    await del(existing.imageUrl).catch(() => {});
   }
   await prisma.receipt.delete({ where: { id: params.id } });
   return NextResponse.json({ ok: true });

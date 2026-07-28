@@ -6,10 +6,11 @@ generator client {
 }
 
 datasource db {
-  // Voor de MVP gebruiken we SQLite (geen externe database nodig).
-  // Voor productie: zet provider op "postgresql" en pas DATABASE_URL aan.
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  // Gepoolde connectie (Vercel Postgres: POSTGRES_PRISMA_URL).
+  url       = env("DATABASE_URL")
+  // Directe connectie voor migraties/db push (Vercel Postgres: POSTGRES_URL_NON_POOLING).
+  directUrl = env("DIRECT_URL")
 }
 
 // Gebruiker: kan een KLANT (musteri) of een BOEKHOUDER (muhasebeci) zijn.
@@ -31,8 +32,8 @@ model Receipt {
   userId       String
   user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  // originele foto
-  imagePath    String // pad op schijf
+  // originele foto (Vercel Blob URL)
+  imageUrl     String
   originalName String?
   mimeType     String?
 

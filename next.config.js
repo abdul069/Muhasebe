@@ -1,10 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  // tesseract.js en exceljs bevatten native/optionele modules die niet in de
-  // client-bundle horen; markeer ze als extern voor server components.
+  // exceljs bevat optionele modules die niet in de client-bundle horen;
+  // markeer als extern voor server components. (OCR draait nu client-side.)
   experimental: {
-    serverComponentsExternalPackages: ["tesseract.js", "exceljs"],
+    serverComponentsExternalPackages: ["exceljs"],
   },
 };
 
