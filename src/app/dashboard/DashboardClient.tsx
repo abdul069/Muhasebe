@@ -24,6 +24,7 @@ interface Receipt {
   taxAmount: number | null;
   currency: string | null;
   status: string;
+  docType: string;
   createdAt: string;
   user: ReceiptUser;
 }
@@ -258,6 +259,7 @@ export default function DashboardClient({ user }: { user: UserInfo }) {
                   <tr>
                     <th>Foto</th>
                     <th>Tarih</th>
+                    <th>Belge</th>
                     {isAccountant && <th>Müşteri</th>}
                     <th>Satıcı</th>
                     <th>Tutar</th>
@@ -278,6 +280,13 @@ export default function DashboardClient({ user }: { user: UserInfo }) {
                         />
                       </td>
                       <td>{fmtDate(r.receiptDate)}</td>
+                      <td>
+                        {r.docType === "Z_REPORT" ? (
+                          <span className="badge zreport">Z Raporu</span>
+                        ) : (
+                          <span className="badge receipt">Fiş</span>
+                        )}
+                      </td>
                       {isAccountant && (
                         <td>{r.user.companyName || r.user.name}</td>
                       )}

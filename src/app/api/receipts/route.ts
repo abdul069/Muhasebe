@@ -117,9 +117,18 @@ export async function POST(req: NextRequest) {
         totalAmount: parsed.totalAmount ?? null,
         taxAmount: parsed.taxAmount ?? null,
         currency: parsed.currency,
+        docType: parsed.docType,
         status: "PROCESSED",
         processedAt: new Date(),
+        vatLines: {
+          create: parsed.vatLines.map((l) => ({
+            rate: l.rate,
+            base: l.base ?? null,
+            amount: l.amount,
+          })),
+        },
       },
+      include: { vatLines: true },
     });
     return NextResponse.json({ ok: true, receipt: updated });
   } catch (err) {

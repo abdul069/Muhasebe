@@ -4,13 +4,24 @@
  * De boekhouder kan deze velden achteraf altijd corrigeren in de UI.
  */
 
+export interface VatLineParsed {
+  rate: number; // KDV-oran in procenten (bv. 1, 10, 20; ook oud 8/18)
+  base?: number; // matrah (belastbare grondslag) voor dit tarief
+  amount: number; // KDV-bedrag voor dit tarief
+}
+
 export interface ParsedReceipt {
   merchant?: string;
   receiptDate?: Date;
   totalAmount?: number;
   taxAmount?: number;
   currency: string;
+  docType: string; // "RECEIPT" (fiş) of "Z_REPORT" (Z raporu)
+  vatLines: VatLineParsed[]; // KDV-uitsplitsing per tarief
 }
+
+// Geldige Turkse KDV-oranları (incl. historische 8/18).
+const VALID_VAT_RATES = new Set([0, 1, 8, 10, 18, 20]);
 
 /**
  * Zet een Turks geformatteerd bedrag (bv. "1.234,56" of "12,50") om naar number.
@@ -78,8 +89,80 @@ export function parseReceiptDate(text: string): Date | undefined {
   return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
+/**
+ * Bepaalt of het document een Z-raporu (dagafsluiting) is of een gewone fiş.
+ */
+export function detectDocType(text: string): string {
+  const t = text.toLocaleUpperCase("tr-TR");
+  if (
+    /\bZ\s*RAPORU\b|\bZ\s*NO\b|\bZ\s*RAPOR\b|G[ÜU]NL[ÜU]K\s*KAPANI[ŞS]|KUM[ÜU]LAT[İI]F/.test(
+      t
+    )
+  ) {
+    return "Z_REPORT";
+  }
+  return "RECEIPT";
+}
+
+/**
+ * Haalt de KDV-uitsplitsing per tarief uit de tekst.
+ * Herkent regels die zowel "KDV"/"MATRAH" als een tarief-token (%1, %10, %20…) bevatten.
+ * Op een Turkse fiş/Z-raporu staat de uitsplitsing meestal als:
+ *   KDV %01   *5,50
+ *   KDV %20   *90,00
+ * of met matrah:
+ *   %20  MATRAH 450,00  KDV 90,00
+ */
+export function parseVatBreakdown(text: string): VatLineParsed[] {
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const map = new Map<number, { base?: number; amount?: number }>();
+
+  for (const line of lines) {
+    const upper = line.toLocaleUpperCase("tr-TR");
+    // Alleen regels die over KDV/matrah gaan (voorkomt dat productregels als
+    // "EKMEK %1 5,50" meegeteld worden).
+    if (!/KDV|MATRAH/.test(upper)) continue;
+    if (/KDV\s*['`]?\s*S[İI]Z|HAR[İI][ÇC]/.test(upper)) continue; // KDV'siz / hariç
+
+    const rateMatch = upper.match(/%\s?(\d{1,2})/);
+    if (!rateMatch) continue;
+    const rate = parseInt(rateMatch[1], 10);
+    if (!VALID_VAT_RATES.has(rate)) continue;
+
+    const amounts = amountsInLine(line).filter((n) => n !== rate);
+    if (amounts.length === 0) continue;
+
+    const entry = map.get(rate) || {};
+    if (/MATRAH/.test(upper)) {
+      // matrah = grondslag; bij twee bedragen is de tweede meestal de KDV.
+      entry.base = amounts[0];
+      if (amounts.length >= 2) entry.amount = amounts[amounts.length - 1];
+    } else {
+      // "KDV %x  bedrag" -> bedrag is het KDV-bedrag voor dit tarief.
+      entry.amount = amounts[amounts.length - 1];
+    }
+    map.set(rate, entry);
+  }
+
+  const out: VatLineParsed[] = [];
+  for (const [rate, v] of map) {
+    if (v.amount === undefined && v.base === undefined) continue;
+    out.push({ rate, base: v.base, amount: v.amount ?? 0 });
+  }
+  out.sort((a, b) => a.rate - b.rate);
+  return out;
+}
+
 export function parseReceipt(text: string): ParsedReceipt {
-  const result: ParsedReceipt = { currency: detectCurrency(text) };
+  const result: ParsedReceipt = {
+    currency: detectCurrency(text),
+    docType: detectDocType(text),
+    vatLines: parseVatBreakdown(text),
+  };
 
   const lines = text
     .split(/\r?\n/)
@@ -120,6 +203,15 @@ export function parseReceipt(text: string): ParsedReceipt {
   }
 
   result.totalAmount = total;
-  result.taxAmount = tax;
+
+  // Als er een KDV-uitsplitsing is, is de som daarvan het betrouwbaarste
+  // totaal-KDV. Anders vallen we terug op de grootste KDV-regel.
+  if (result.vatLines.length > 0) {
+    const sum = result.vatLines.reduce((s, l) => s + (l.amount || 0), 0);
+    result.taxAmount = sum > 0 ? sum : tax;
+  } else {
+    result.taxAmount = tax;
+  }
+
   return result;
 }

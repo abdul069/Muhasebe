@@ -290,6 +290,26 @@ tbody tr:hover {
   background: #fef2f2;
   color: var(--danger);
 }
+.badge.zreport {
+  background: #eef2ff;
+  color: #4338ca;
+}
+.badge.receipt {
+  background: #f1f5f9;
+  color: var(--text-muted);
+}
+
+.vat-table th,
+.vat-table td {
+  padding: 6px 8px;
+  white-space: nowrap;
+}
+.vat-table input {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+}
 
 .toolbar {
   display: flex;

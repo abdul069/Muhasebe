@@ -17,6 +17,7 @@ export default async function ReceiptPage({
     where: { id: params.id },
     include: {
       user: { select: { id: true, name: true, companyName: true, email: true } },
+      vatLines: { orderBy: { rate: "asc" } },
     },
   });
 
@@ -39,10 +40,16 @@ export default async function ReceiptPage({
         currency: receipt.currency || "TRY",
         note: receipt.note,
         status: receipt.status,
+        docType: receipt.docType,
         ocrText: receipt.ocrText || "",
         createdAt: receipt.createdAt.toISOString(),
         clientName: receipt.user.companyName || receipt.user.name,
         clientEmail: receipt.user.email,
+        vatLines: receipt.vatLines.map((v) => ({
+          rate: v.rate,
+          base: v.base,
+          amount: v.amount,
+        })),
       }}
     />
   );

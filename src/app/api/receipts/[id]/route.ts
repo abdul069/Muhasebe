@@ -11,6 +11,7 @@ async function loadOwned(id: string, session: { userId: string; role: string }) 
     where: { id },
     include: {
       user: { select: { id: true, name: true, companyName: true, email: true } },
+      vatLines: { orderBy: { rate: "asc" } },
     },
   });
   if (!receipt) return null;
@@ -58,6 +59,9 @@ export async function PATCH(
   if ("merchant" in body) data.merchant = body.merchant?.toString() || null;
   if ("note" in body) data.note = body.note?.toString() || null;
   if ("currency" in body) data.currency = body.currency?.toString() || "TRY";
+  if ("docType" in body) {
+    data.docType = body.docType === "Z_REPORT" ? "Z_REPORT" : "RECEIPT";
+  }
 
   if ("receiptDate" in body) {
     const d = body.receiptDate ? new Date(body.receiptDate) : null;
@@ -76,10 +80,42 @@ export async function PATCH(
     data.taxAmount = n != null && Number.isFinite(n) ? n : null;
   }
 
-  const updated = await prisma.receipt.update({
-    where: { id: params.id },
-    data,
+  // KDV-uitsplitsing (optioneel): vervang de volledige set.
+  let vatLinesData: { rate: number; base: number | null; amount: number }[] | null =
+    null;
+  if ("vatLines" in body && Array.isArray(body.vatLines)) {
+    vatLinesData = body.vatLines
+      .map((l: Record<string, unknown>) => {
+        const rate = Number(l.rate);
+        const amount = Number(l.amount);
+        const baseRaw = l.base;
+        const base =
+          baseRaw === "" || baseRaw == null ? null : Number(baseRaw);
+        return {
+          rate: Number.isFinite(rate) ? rate : NaN,
+          base: base != null && Number.isFinite(base) ? base : null,
+          amount: Number.isFinite(amount) ? amount : 0,
+        };
+      })
+      .filter((l: { rate: number }) => Number.isFinite(l.rate));
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    if (vatLinesData) {
+      await tx.vatLine.deleteMany({ where: { receiptId: params.id } });
+      if (vatLinesData.length > 0) {
+        await tx.vatLine.createMany({
+          data: vatLinesData.map((l) => ({ ...l, receiptId: params.id })),
+        });
+      }
+    }
+    return tx.receipt.update({
+      where: { id: params.id },
+      data,
+      include: { vatLines: { orderBy: { rate: "asc" } } },
+    });
   });
+
   return NextResponse.json({ ok: true, receipt: updated });
 }
 

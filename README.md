@@ -11,6 +11,19 @@ Elke bon wordt dus op drie manieren beschikbaar:
    velden (winkel, datum, totaal/TOPLAM, KDV)
 3. **Excel** — export van alle (gefilterde) bonnen als `.xlsx`
 
+### KDV-uitsplitsing per tarief (Z-raporu)
+
+Elke bon — en zeker een **Z-raporu** (dagafsluiting) — wordt uitgesplitst per
+**KDV-oran** (%1, %10, %20, en historisch %8/%18). Per tarief worden de
+**matrah** (belastbare grondslag) en het **KDV-bedrag** herkend en opgeslagen.
+
+- De boekhouder ziet en corrigeert de uitsplitsing in het bon-detailscherm.
+- Het documenttype (Fiş vs Z Raporu) wordt automatisch gedetecteerd en is
+  handmatig aanpasbaar.
+- De Excel-export bevat een tweede blad **"KDV Dağılımı"** met één regel per
+  (bon × KDV-tarief) plus een samenvatting per oran — direct pivot-baar voor de
+  btw-aangifte.
+
 ---
 
 ## Tech stack

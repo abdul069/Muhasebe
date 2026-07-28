@@ -34,6 +34,7 @@ export async function GET(req: NextRequest) {
     orderBy: { receiptDate: "asc" },
     include: {
       user: { select: { name: true, companyName: true, email: true } },
+      vatLines: { orderBy: { rate: "asc" } },
     },
   });
 
@@ -44,6 +45,7 @@ export async function GET(req: NextRequest) {
 
   ws.columns = [
     { header: "Tarih", key: "date", width: 12 },
+    { header: "Belge Tipi", key: "docType", width: 14 },
     { header: "Müşteri / Firma", key: "client", width: 28 },
     { header: "Satıcı / Mağaza", key: "merchant", width: 30 },
     { header: "Toplam Tutar", key: "total", width: 15 },
@@ -68,10 +70,15 @@ export async function GET(req: NextRequest) {
     PROCESSED: "İşlendi",
     FAILED: "Okunamadı",
   };
+  const docTypeLabel: Record<string, string> = {
+    RECEIPT: "Fiş",
+    Z_REPORT: "Z Raporu",
+  };
 
   for (const r of receipts) {
     ws.addRow({
       date: fmtDate(r.receiptDate),
+      docType: docTypeLabel[r.docType] || r.docType,
       client: r.user.companyName || r.user.name,
       merchant: r.merchant || "",
       total: r.totalAmount ?? "",
@@ -96,6 +103,63 @@ export async function GET(req: NextRequest) {
     tax: taxSum,
   });
   totalRow.font = { bold: true };
+
+  // ---- Tweede blad: KDV-uitsplitsing per tarief ----
+  const vatWs = wb.addWorksheet("KDV Dağılımı");
+  vatWs.columns = [
+    { header: "Tarih", key: "date", width: 12 },
+    { header: "Belge Tipi", key: "docType", width: 14 },
+    { header: "Müşteri / Firma", key: "client", width: 28 },
+    { header: "Satıcı / Mağaza", key: "merchant", width: 28 },
+    { header: "KDV Oranı (%)", key: "rate", width: 14 },
+    { header: "Matrah", key: "base", width: 14 },
+    { header: "KDV Tutarı", key: "vat", width: 14 },
+  ];
+  vatWs.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+  vatWs.getRow(1).fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FF1F2937" },
+  };
+
+  // Per-tarief-totalen om onderaan te tonen.
+  const rateTotals = new Map<number, { base: number; vat: number }>();
+
+  for (const r of receipts) {
+    for (const v of r.vatLines) {
+      vatWs.addRow({
+        date: fmtDate(r.receiptDate),
+        docType: docTypeLabel[r.docType] || r.docType,
+        client: r.user.companyName || r.user.name,
+        merchant: r.merchant || "",
+        rate: v.rate,
+        base: v.base ?? "",
+        vat: v.amount ?? "",
+      });
+      const t = rateTotals.get(v.rate) || { base: 0, vat: 0 };
+      t.base += v.base || 0;
+      t.vat += v.amount || 0;
+      rateTotals.set(v.rate, t);
+    }
+  }
+
+  vatWs.getColumn("base").numFmt = "#,##0.00";
+  vatWs.getColumn("vat").numFmt = "#,##0.00";
+
+  // Samenvatting per KDV-oran onderaan.
+  vatWs.addRow({});
+  const sumHeader = vatWs.addRow({ merchant: "ORANA GÖRE ÖZET" });
+  sumHeader.font = { bold: true };
+  for (const rate of Array.from(rateTotals.keys()).sort((a, b) => a - b)) {
+    const t = rateTotals.get(rate)!;
+    const row = vatWs.addRow({
+      merchant: `%${rate}`,
+      rate,
+      base: t.base,
+      vat: t.vat,
+    });
+    row.font = { bold: true };
+  }
 
   const buffer = await wb.xlsx.writeBuffer();
   const filename = `fisler-${new Date().toISOString().slice(0, 10)}.xlsx`;

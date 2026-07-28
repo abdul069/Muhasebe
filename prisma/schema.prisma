@@ -39,6 +39,7 @@ model Receipt {
   // OCR resultaat (ruwe tekst)
   ocrText      String?
   status       String    @default("PENDING") // PENDING | PROCESSED | FAILED
+  docType      String    @default("RECEIPT") // RECEIPT (fiş) | Z_REPORT (Z raporu)
 
   // uit OCR geparste (en door boekhouder corrigeerbare) velden
   merchant     String? // winkel / leverancier
@@ -48,9 +49,24 @@ model Receipt {
   currency     String?   @default("TRY")
   note         String? // vrije notitie
 
+  vatLines     VatLine[] // KDV-uitsplitsing per tarief
+
   createdAt    DateTime  @default(now())
   processedAt  DateTime?
 
   @@index([userId])
   @@index([status])
+}
+
+// KDV-regel: één per KDV-oran op een fiş / Z raporu.
+model VatLine {
+  id        String  @id @default(cuid())
+  receiptId String
+  receipt   Receipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+
+  rate      Float // KDV-oran in procenten (1, 10, 20, ...)
+  base      Float? // matrah (belastbare grondslag)
+  amount    Float // KDV-bedrag voor dit tarief
+
+  @@index([receiptId])
 }
