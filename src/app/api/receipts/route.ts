@@ -24,6 +24,7 @@ export async function GET(req: NextRequest) {
   const receipts = await prisma.receipt.findMany({
     where,
     orderBy: { createdAt: "desc" },
+    omit: { imageData: true, ocrText: true }, // geen zware velden in de lijst
     include: {
       user: { select: { id: true, name: true, companyName: true } },
     },
@@ -47,16 +48,33 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Geçersiz veri." }, { status: 400 });
   }
 
-  const imageUrl = String(body.imageUrl || "");
-  if (!/^https:\/\/[^\s]+/.test(imageUrl)) {
+  // Afbeelding komt als data-URL of kale base64 binnen.
+  const imageBase64 = String(body.imageBase64 || "");
+  const base64 = imageBase64.includes(",")
+    ? imageBase64.slice(imageBase64.indexOf(",") + 1)
+    : imageBase64;
+  if (!base64) {
     return NextResponse.json(
-      { error: "Geçerli bir görsel URL'si gerekli." },
+      { error: "Görsel verisi gerekli." },
       { status: 400 }
+    );
+  }
+  let imageData: Buffer;
+  try {
+    imageData = Buffer.from(base64, "base64");
+  } catch {
+    return NextResponse.json({ error: "Geçersiz görsel." }, { status: 400 });
+  }
+  // Extra veiligheidsmarge onder de serverless request-limiet.
+  if (imageData.length > 8 * 1024 * 1024) {
+    return NextResponse.json(
+      { error: "Görsel çok büyük." },
+      { status: 413 }
     );
   }
 
   const ocrText = typeof body.ocrText === "string" ? body.ocrText : "";
-  const mimeType = body.mimeType ? String(body.mimeType) : null;
+  const mimeType = body.mimeType ? String(body.mimeType) : "image/jpeg";
   const originalName = body.originalName ? String(body.originalName) : null;
 
   // Server-side parsen (parser blijft de bron van waarheid).
@@ -66,7 +84,7 @@ export async function POST(req: NextRequest) {
   const receipt = await prisma.receipt.create({
     data: {
       userId: session.userId,
-      imageUrl,
+      imageData,
       originalName,
       mimeType,
       ocrText: ocrText || null,
@@ -86,6 +104,7 @@ export async function POST(req: NextRequest) {
         })),
       },
     },
+    omit: { imageData: true },
     include: { vatLines: true },
   });
 

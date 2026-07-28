@@ -35,17 +35,18 @@ Elke bon — en zeker een **Z-raporu** (dagafsluiting) — wordt uitgesplitst pe
 | Auth        | JWT-sessie in httpOnly-cookie (`jose`, bcrypt)     |
 | OCR         | `tesseract.js` **client-side** (browser, Turks)    |
 | Excel       | `exceljs`                                           |
-| Opslag foto | **Vercel Blob** (directe client-upload)            |
+| Opslag foto | **In de database** (in de browser gecomprimeerd)   |
 
-De OCR draait in de **browser van de klant**; de serverless-functie ontvangt
-alleen metadata (Blob-URL + herkende tekst) en parseert die. Zo zijn er geen
-server-time-outs en past de app op Vercel.
+De OCR draait in de **browser van de klant**; de foto wordt daar ook
+gecomprimeerd. De serverless-functie ontvangt de (kleine) foto + herkende tekst,
+parseert die en slaat alles in de database op. Zo zijn er geen server-time-outs
+en is er geen aparte object-storage nodig.
 
 ---
 
 ## Snel starten (lokaal)
 
-Je hebt een Postgres-URL en een Vercel Blob-token nodig (beide gratis).
+Je hebt alleen een Postgres-URL nodig (bv. Prisma Postgres of Neon, gratis).
 De makkelijkste weg is het project in Vercel koppelen en dan `vercel env pull`.
 
 ```bash
@@ -89,8 +90,8 @@ Open daarna <http://localhost:3000>.
 - Logt in, gaat naar het dashboard.
 - Maakt/kiest een foto van een fiş (op mobiel opent direct de camera dankzij
   `capture="environment"`). Meerdere foto's tegelijk kan.
-- In de browser: OCR draait → foto gaat naar Blob → metadata naar de server →
-  velden worden automatisch ingevuld.
+- In de browser: OCR draait → foto wordt gecomprimeerd → foto + tekst naar de
+  server → velden worden automatisch ingevuld.
 - Ziet zijn eigen bonnen met status (İşlendi / Bekliyor / Okunamadı).
 
 ### Boekhouder (muhasebeci)
@@ -123,7 +124,6 @@ src/
     api/
       auth/            # register / login / logout
       receipts/        # lijst, aanmaken, detail, bewerken, verwijderen, foto
-        blob-upload/   # token-endpoint voor directe Blob-upload
       clients/         # klantenlijst (boekhouder)
       export/          # Excel-export (+ blad KDV Dağılımı)
 ```
@@ -133,18 +133,16 @@ src/
 ## Deploy naar Vercel
 
 1. **Push** deze repo naar GitHub en **importeer** hem in Vercel.
-2. In het Vercel-project → **Storage**:
-   - Maak een **Postgres**-database aan (Prisma Postgres). Dit zet o.a.
-     `POSTGRES_URL` — die gebruikt `prisma/schema.prisma`.
-   - Maak een **Blob**-store aan en **koppel** hem aan dit project
-     (*Connect Project*). Pas dan wordt `BLOB_READ_WRITE_TOKEN` geïnjecteerd —
-     `BLOB_STORE_ID` / `BLOB_WEBHOOK_PUBLIC_KEY` alleen zijn niet genoeg.
+2. In het Vercel-project → **Storage**: maak een **Postgres**-database aan
+   (Prisma Postgres). Dit zet o.a. `POSTGRES_URL` — die gebruikt
+   `prisma/schema.prisma`. (Geen aparte object-storage nodig: foto's gaan in de
+   database.)
 3. Zet de overige **Environment Variables** (Production + Preview):
    - `SESSION_SECRET` = een sterke random string (`openssl rand -base64 32`) —
      **verplicht**, anders faalt inloggen.
    - `NEXT_PUBLIC_OCR_LANGS` = `tur+eng` (optioneel).
-   - De database- en Blob-variabelen worden door de integraties gezet; niets
-     handmatig aan te passen.
+   - De database-variabelen worden door de integratie gezet; niets handmatig aan
+     te passen.
 4. **Deploy.** Het `vercel-build`-script draait `prisma db push` en maakt de
    tabellen aan bij de eerste build.
 5. **Demo-accounts** (eenmalig): `vercel env pull .env.local && npm run db:seed`,
@@ -154,10 +152,9 @@ src/
 > je gewone (plain) Postgres, wijs `url` in `prisma/schema.prisma` dan naar je
 > eigen connectie-variabele.
 
-> **Toegang tot foto's:** Vercel Blob-URL's zijn publiek maar onraadbaar. De
-> route `/api/receipts/:id/image` controleert eerst de login en stuurt dan door.
-> Voor strengere afscherming van financiële documenten kun je later overstappen
-> op private opslag of een proxy met korte-levensduur-URL's.
+> **Toegang tot foto's:** de foto zit in de database; de route
+> `/api/receipts/:id/image` controleert eerst de login en serveert dan de bytes.
+> Alleen de eigenaar en de boekhouder kunnen een foto opvragen.
 
 ---
 

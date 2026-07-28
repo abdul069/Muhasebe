@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { upload } from "@vercel/blob/client";
 import { runClientOcr } from "@/lib/ocr-client";
+import { compressImage } from "@/lib/image-client";
 
 interface UserInfo {
   name: string;
@@ -129,22 +129,19 @@ export default function DashboardClient({ user }: { user: UserInfo }) {
           ocrText = ""; // OCR mislukte; foto wordt toch bewaard
         }
 
-        // 2) Foto rechtstreeks naar Vercel Blob uploaden.
-        setUploadStatus(`${prefix}Fotoğraf yükleniyor…`);
-        const blob = await upload(file.name, file, {
-          access: "public",
-          handleUploadUrl: "/api/receipts/blob-upload",
-          contentType: file.type || undefined,
-        });
+        // 2) Foto in de browser verkleinen/comprimeren.
+        setUploadStatus(`${prefix}Fotoğraf hazırlanıyor…`);
+        const compressed = await compressImage(file);
 
-        // 3) Metadata naar de server sturen (server parseert de OCR-tekst).
+        // 3) Foto + metadata naar de server sturen (server parseert de OCR-tekst
+        //    en slaat de afbeelding op in de database).
         setUploadStatus(`${prefix}Kaydediliyor…`);
         const res = await fetch("/api/receipts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            imageUrl: blob.url,
-            mimeType: file.type || null,
+            imageBase64: compressed.dataUrl,
+            mimeType: compressed.mimeType,
             originalName: file.name || null,
             ocrText,
           }),

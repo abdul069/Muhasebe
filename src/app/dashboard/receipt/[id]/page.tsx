@@ -15,6 +15,7 @@ export default async function ReceiptPage({
 
   const receipt = await prisma.receipt.findUnique({
     where: { id: params.id },
+    omit: { imageData: true },
     include: {
       user: { select: { id: true, name: true, companyName: true, email: true } },
       vatLines: { orderBy: { rate: "asc" } },

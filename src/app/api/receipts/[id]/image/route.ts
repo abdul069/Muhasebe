@@ -6,8 +6,7 @@ export const runtime = "nodejs";
 
 /**
  * GET /api/receipts/:id/image
- * Controleert de toegang en stuurt door naar de (onraadbare) Blob-URL.
- * Zo blijft de DB-gekoppelde toegang bewaakt.
+ * Controleert de toegang en serveert de originele foto uit de database.
  */
 export async function GET(
   _req: NextRequest,
@@ -19,14 +18,22 @@ export async function GET(
 
   const receipt = await prisma.receipt.findUnique({
     where: { id: params.id },
-    select: { userId: true, imageUrl: true },
+    select: { userId: true, imageData: true, mimeType: true },
   });
-  if (!receipt || !receipt.imageUrl) {
+  if (!receipt || !receipt.imageData) {
     return NextResponse.json({ error: "Görsel bulunamadı." }, { status: 404 });
   }
   if (session.role !== "ACCOUNTANT" && receipt.userId !== session.userId) {
     return NextResponse.json({ error: "Yetkiniz yok." }, { status: 403 });
   }
 
-  return NextResponse.redirect(receipt.imageUrl);
+  const bytes = Buffer.from(receipt.imageData);
+  return new NextResponse(bytes as unknown as BodyInit, {
+    status: 200,
+    headers: {
+      "Content-Type": receipt.mimeType || "image/jpeg",
+      "Cache-Control": "private, max-age=3600",
+      "Content-Length": String(bytes.length),
+    },
+  });
 }

@@ -10,7 +10,11 @@ if (!process.env.POSTGRES_URL) {
 }
 
 try {
-  execSync("prisma db push --skip-generate", { stdio: "inherit" });
+  // --accept-data-loss: sta de kolomwissel (imageUrl -> imageData) toe.
+  // De Receipt-tabel is nieuw/leeg, dus er gaat geen echte data verloren.
+  execSync("prisma db push --skip-generate --accept-data-loss", {
+    stdio: "inherit",
+  });
 } catch (e) {
   console.error(
     "[db-push] db push mislukte; build gaat door. Draai later opnieuw.",

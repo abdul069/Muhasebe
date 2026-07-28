@@ -2,7 +2,8 @@
 // Docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["omitApi"]
 }
 
 datasource db {
@@ -31,8 +32,8 @@ model Receipt {
   userId       String
   user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  // originele foto (Vercel Blob URL)
-  imageUrl     String
+  // originele foto (gecomprimeerd, opgeslagen in de database als bytes)
+  imageData    Bytes?
   originalName String?
   mimeType     String?
 

@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { del } from "@vercel/blob";
 import { prisma } from "@/lib/prisma";
 import { requireUser, isAccountant } from "@/lib/auth";
 
@@ -8,6 +7,7 @@ export const runtime = "nodejs";
 async function loadOwned(id: string, session: { userId: string; role: string }) {
   const receipt = await prisma.receipt.findUnique({
     where: { id },
+    omit: { imageData: true }, // niet de zware bytes meeladen
     include: {
       user: { select: { id: true, name: true, companyName: true, email: true } },
       vatLines: { orderBy: { rate: "asc" } },
@@ -132,10 +132,7 @@ export async function DELETE(
   if (existing === "forbidden")
     return NextResponse.json({ error: "Yetkiniz yok." }, { status: 403 });
 
-  // Verwijder de foto uit Vercel Blob (best-effort).
-  if (existing.imageUrl) {
-    await del(existing.imageUrl).catch(() => {});
-  }
+  // De foto (imageData) wordt automatisch mee verwijderd met de rij.
   await prisma.receipt.delete({ where: { id: params.id } });
   return NextResponse.json({ ok: true });
 }
