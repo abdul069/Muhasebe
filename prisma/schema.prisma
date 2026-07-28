@@ -1,0 +1,56 @@
+// Prisma schema voor het dijitale fis-platform
+// Docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  // Voor de MVP gebruiken we SQLite (geen externe database nodig).
+  // Voor productie: zet provider op "postgresql" en pas DATABASE_URL aan.
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Gebruiker: kan een KLANT (musteri) of een BOEKHOUDER (muhasebeci) zijn.
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  companyName  String? // bedrijfsnaam van de klant
+  role         String   @default("CLIENT") // "CLIENT" of "ACCOUNTANT"
+  createdAt    DateTime @default(now())
+
+  receipts Receipt[]
+}
+
+// Fis / kassabon
+model Receipt {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // originele foto
+  imagePath    String // pad op schijf
+  originalName String?
+  mimeType     String?
+
+  // OCR resultaat (ruwe tekst)
+  ocrText      String?
+  status       String    @default("PENDING") // PENDING | PROCESSED | FAILED
+
+  // uit OCR geparste (en door boekhouder corrigeerbare) velden
+  merchant     String? // winkel / leverancier
+  receiptDate  DateTime? // datum op de bon
+  totalAmount  Float? // totaalbedrag
+  taxAmount    Float? // KDV (btw)
+  currency     String?   @default("TRY")
+  note         String? // vrije notitie
+
+  createdAt    DateTime  @default(now())
+  processedAt  DateTime?
+
+  @@index([userId])
+  @@index([status])
+}
