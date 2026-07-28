@@ -3,8 +3,9 @@
 // (bijv. bij de allereerste deploy vóórdat de Postgres-koppeling is gezet).
 const { execSync } = require("child_process");
 
-if (!process.env.DATABASE_URL) {
-  console.log("[db-push] DATABASE_URL ontbreekt — db push overgeslagen.");
+// De datasource in prisma/schema.prisma gebruikt POSTGRES_URL.
+if (!process.env.POSTGRES_URL) {
+  console.log("[db-push] POSTGRES_URL ontbreekt — db push overgeslagen.");
   process.exit(0);
 }
 
