@@ -6,11 +6,10 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  // Gepoolde connectie (Vercel Postgres: POSTGRES_PRISMA_URL).
-  url       = env("DATABASE_URL")
-  // Directe connectie voor migraties/db push (Vercel Postgres: POSTGRES_URL_NON_POOLING).
-  directUrl = env("DIRECT_URL")
+  provider = "postgresql"
+  // Prisma Postgres levert POSTGRES_URL als directe postgres://-connectie.
+  // (PRISMA_DATABASE_URL bestaat apart voor de Accelerate-variant.)
+  url      = env("POSTGRES_URL")
 }
 
 // Gebruiker: kan een KLANT (musteri) of een BOEKHOUDER (muhasebeci) zijn.

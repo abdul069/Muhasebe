@@ -134,18 +134,25 @@ src/
 
 1. **Push** deze repo naar GitHub en **importeer** hem in Vercel.
 2. In het Vercel-project → **Storage**:
-   - Maak een **Postgres**-database aan (koppelt automatisch
-     `POSTGRES_PRISMA_URL` en `POSTGRES_URL_NON_POOLING`).
-   - Maak een **Blob**-store aan (koppelt automatisch `BLOB_READ_WRITE_TOKEN`).
-3. Zet de **Environment Variables**:
-   - `DATABASE_URL` = de waarde van `POSTGRES_PRISMA_URL` (gepoold)
-   - `DIRECT_URL` = de waarde van `POSTGRES_URL_NON_POOLING`
-   - `SESSION_SECRET` = een sterke random string (`openssl rand -base64 32`)
-   - `NEXT_PUBLIC_OCR_LANGS` = `tur+eng` (optioneel)
+   - Maak een **Postgres**-database aan (Prisma Postgres). Dit zet o.a.
+     `POSTGRES_URL` — die gebruikt `prisma/schema.prisma`.
+   - Maak een **Blob**-store aan en **koppel** hem aan dit project
+     (*Connect Project*). Pas dan wordt `BLOB_READ_WRITE_TOKEN` geïnjecteerd —
+     `BLOB_STORE_ID` / `BLOB_WEBHOOK_PUBLIC_KEY` alleen zijn niet genoeg.
+3. Zet de overige **Environment Variables** (Production + Preview):
+   - `SESSION_SECRET` = een sterke random string (`openssl rand -base64 32`) —
+     **verplicht**, anders faalt inloggen.
+   - `NEXT_PUBLIC_OCR_LANGS` = `tur+eng` (optioneel).
+   - De database- en Blob-variabelen worden door de integraties gezet; niets
+     handmatig aan te passen.
 4. **Deploy.** Het `vercel-build`-script draait `prisma db push` en maakt de
    tabellen aan bij de eerste build.
 5. **Demo-accounts** (eenmalig): `vercel env pull .env.local && npm run db:seed`,
    of maak een boekhouder aan door in de database `role = 'ACCOUNTANT'` te zetten.
+
+> **Let op:** deze app gebruikt **Prisma Postgres** via `POSTGRES_URL`. Gebruik
+> je gewone (plain) Postgres, wijs `url` in `prisma/schema.prisma` dan naar je
+> eigen connectie-variabele.
 
 > **Toegang tot foto's:** Vercel Blob-URL's zijn publiek maar onraadbaar. De
 > route `/api/receipts/:id/image` controleert eerst de login en stuurt dan door.
