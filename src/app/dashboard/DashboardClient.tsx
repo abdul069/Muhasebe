@@ -217,9 +217,10 @@ export default function DashboardClient({ user }: { user: UserInfo }) {
               Kasa fişinizin fotoğrafını çekin veya seçin. Sistem otomatik
               olarak okur (OCR) ve muhasebecinize iletir.
             </p>
-            <div
+            <label
+              htmlFor="receipt-file"
               className="dropzone"
-              onClick={() => fileRef.current?.click()}
+              style={{ display: "block" }}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => {
                 e.preventDefault();
@@ -230,24 +231,35 @@ export default function DashboardClient({ user }: { user: UserInfo }) {
               <p>
                 {uploading
                   ? uploadStatus || "İşleniyor…"
-                  : "Fotoğraf seçmek için tıklayın veya buraya sürükleyin"}
+                  : "Fotoğraf çekin veya galeriden seçin"}
               </p>
               {!uploading && (
-                <p className="muted" style={{ margin: "6px 0 0", fontSize: 13 }}>
-                  Metin okuma (OCR) tarayıcınızda çalışır; ilk seferde Türkçe dil
-                  dosyası indirilir.
-                </p>
+                <>
+                  <span
+                    className="btn"
+                    style={{ marginTop: 8, pointerEvents: "none" }}
+                  >
+                    Fotoğraf seç
+                  </span>
+                  <p
+                    className="muted"
+                    style={{ margin: "10px 0 0", fontSize: 13 }}
+                  >
+                    Metin okuma (OCR) tarayıcınızda çalışır; ilk seferde Türkçe
+                    dil dosyası indirilir.
+                  </p>
+                </>
               )}
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                multiple
-                hidden
-                onChange={(e) => onUpload(e.target.files)}
-              />
-            </div>
+            </label>
+            <input
+              id="receipt-file"
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              multiple
+              hidden
+              onChange={(e) => onUpload(e.target.files)}
+            />
           </div>
         )}
 
