@@ -113,24 +113,47 @@ export function detectDocType(text: string): string {
  * of met matrah:
  *   %20  MATRAH 450,00  KDV 90,00
  */
+// OCR verwart cijfers vaak met letters; herstel het tarief-token na "%".
+const RATE_CHAR_MAP: Record<string, string> = {
+  O: "0", Q: "0", D: "0", B: "8", I: "1", İ: "1", L: "1",
+  S: "5", Z: "2", G: "6", T: "7", A: "4",
+};
+
+function rateFromLine(upper: string): number | null {
+  const m = upper.match(/%\s?([0-9OQDBIİLSZGTA]{1,2})/);
+  if (!m) return null;
+  const repaired = m[1]
+    .split("")
+    .map((c) => (/[0-9]/.test(c) ? c : RATE_CHAR_MAP[c] ?? c))
+    .join("");
+  const r = parseInt(repaired, 10);
+  return Number.isFinite(r) && VALID_VAT_RATES.has(r) ? r : null;
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 export function parseVatBreakdown(text: string): VatLineParsed[] {
   const lines = text
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean);
 
-  const map = new Map<number, { base?: number; amount?: number }>();
-  // Onthoudt het lopende tarief, zodat een KDV-bedrag op de VOLGENDE regel
-  // (Z-raporu "Vergi Döküm"-layout) aan het juiste tarief gekoppeld wordt:
-  //   % 8 KDV     TOPLAM : 333,00
-  //               KDV    :  24,67
+  // grossBase: kwam de grondslag van een TOPLAM-regel (bruto, incl. KDV)?
+  const map = new Map<
+    number,
+    { base?: number; amount?: number; grossBase?: boolean }
+  >();
   let currentRate: number | null = null;
 
-  // Regels die een andere sectie starten -> lopende koppeling stoppen.
   const isReset = (u: string) =>
     /KASA|BANKA|EVRAK|[ÖO]DEME|NAK[İI]T|C[İI]RO|BAK[İI]YE|G[İI]R[İI][ŞS]|[ÇC]IKI[ŞS]/.test(
       u
     );
+  // OCR leest "KDV" soms als "KOV" / "K0V"; matrah soms als "MATRAM".
+  const kdvRe = /K[D0O]V|K\.D\.V/;
+  const baseRe = /MATRAH|MATRAM|TOPLAM|TUTAR/;
 
   for (const line of lines) {
     const upper = line.toLocaleUpperCase("tr-TR");
@@ -139,26 +162,30 @@ export function parseVatBreakdown(text: string): VatLineParsed[] {
       currentRate = null;
       continue;
     }
-    if (/KDV\s*['`]?\s*S[İI]Z|HAR[İI][ÇC]/.test(upper)) continue; // KDV'siz / hariç
+    if (/K[D0O]V\s*['`]?\s*S[İI]Z|HAR[İI][ÇC]/.test(upper)) continue; // KDV'siz / hariç
 
-    const rateMatch = upper.match(/%\s?(\d{1,2})/);
-    const rate = rateMatch ? parseInt(rateMatch[1], 10) : null;
-    const isKdvLine = /KDV|K\.D\.V/.test(upper);
-    const isBaseLine = /MATRAH|TOPLAM|TUTAR/.test(upper);
+    const rate = rateFromLine(upper);
+    const isKdvLine = kdvRe.test(upper);
+    const isBaseLine = baseRe.test(upper);
 
-    if (rate !== null && VALID_VAT_RATES.has(rate)) {
-      // Regel die een tarief introduceert.
+    // Een tarief-regel telt alleen als hij ook over KDV/grondslag gaat
+    // (voorkomt dat bv. "%10 İSKONTO" als KDV-tarief wordt gezien).
+    if (rate !== null && (isKdvLine || isBaseLine)) {
       currentRate = rate;
       const amounts = amountsInLine(line).filter((n) => n !== rate);
       const entry = map.get(rate) || {};
       if (amounts.length >= 2) {
-        // grondslag + KDV op één regel
-        if (entry.base === undefined) entry.base = amounts[0];
+        if (entry.base === undefined) {
+          entry.base = amounts[0];
+          entry.grossBase = !/MATRAH|MATRAM/.test(upper);
+        }
         if (entry.amount === undefined) entry.amount = amounts[amounts.length - 1];
       } else if (amounts.length === 1) {
-        // Bij "TOPLAM/MATRAH" is het bedrag de grondslag; anders het KDV-bedrag.
         if (isBaseLine) {
-          if (entry.base === undefined) entry.base = amounts[0];
+          if (entry.base === undefined) {
+            entry.base = amounts[0];
+            entry.grossBase = !/MATRAH|MATRAM/.test(upper);
+          }
         } else if (isKdvLine) {
           if (entry.amount === undefined) entry.amount = amounts[0];
         }
@@ -173,9 +200,9 @@ export function parseVatBreakdown(text: string): VatLineParsed[] {
           entry.amount = amounts[amounts.length - 1];
         } else if (isBaseLine && !isKdvLine && entry.base === undefined) {
           entry.base = amounts[amounts.length - 1];
+          entry.grossBase = !/MATRAH|MATRAM/.test(upper);
         }
         map.set(currentRate, entry);
-        // Tarief afgerond zodra grondslag én KDV bekend zijn.
         if (entry.base !== undefined && entry.amount !== undefined) {
           currentRate = null;
         }
@@ -186,7 +213,26 @@ export function parseVatBreakdown(text: string): VatLineParsed[] {
   const out: VatLineParsed[] = [];
   for (const [rate, v] of map) {
     if (v.amount === undefined && v.base === undefined) continue;
-    out.push({ rate, base: v.base, amount: v.amount ?? 0 });
+
+    let amount = v.amount;
+    if (v.base !== undefined && rate > 0) {
+      // Verwachte KDV: bij een bruto TOPLAM = base*rate/(100+rate),
+      // bij een netto MATRAH = base*rate/100.
+      const grossKdv = (v.base * rate) / (100 + rate);
+      const netKdv = (v.base * rate) / 100;
+      const near = (a: number, e: number) =>
+        Math.abs(a - e) <= Math.max(0.02, e * 0.03);
+      // Vertrouw het OCR-bedrag alleen als het plausibel is; anders bereken.
+      if (
+        amount === undefined ||
+        amount <= 0 ||
+        !(near(amount, grossKdv) || near(amount, netKdv))
+      ) {
+        amount = round2(v.grossBase === false ? netKdv : grossKdv);
+      }
+    }
+
+    out.push({ rate, base: v.base, amount: amount ?? 0 });
   }
   out.sort((a, b) => a.rate - b.rate);
   return out;
