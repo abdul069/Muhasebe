@@ -120,32 +120,67 @@ export function parseVatBreakdown(text: string): VatLineParsed[] {
     .filter(Boolean);
 
   const map = new Map<number, { base?: number; amount?: number }>();
+  // Onthoudt het lopende tarief, zodat een KDV-bedrag op de VOLGENDE regel
+  // (Z-raporu "Vergi Döküm"-layout) aan het juiste tarief gekoppeld wordt:
+  //   % 8 KDV     TOPLAM : 333,00
+  //               KDV    :  24,67
+  let currentRate: number | null = null;
+
+  // Regels die een andere sectie starten -> lopende koppeling stoppen.
+  const isReset = (u: string) =>
+    /KASA|BANKA|EVRAK|[ÖO]DEME|NAK[İI]T|C[İI]RO|BAK[İI]YE|G[İI]R[İI][ŞS]|[ÇC]IKI[ŞS]/.test(
+      u
+    );
 
   for (const line of lines) {
     const upper = line.toLocaleUpperCase("tr-TR");
-    // Alleen regels die over KDV/matrah gaan (voorkomt dat productregels als
-    // "EKMEK %1 5,50" meegeteld worden).
-    if (!/KDV|MATRAH/.test(upper)) continue;
+
+    if (isReset(upper)) {
+      currentRate = null;
+      continue;
+    }
     if (/KDV\s*['`]?\s*S[İI]Z|HAR[İI][ÇC]/.test(upper)) continue; // KDV'siz / hariç
 
     const rateMatch = upper.match(/%\s?(\d{1,2})/);
-    if (!rateMatch) continue;
-    const rate = parseInt(rateMatch[1], 10);
-    if (!VALID_VAT_RATES.has(rate)) continue;
+    const rate = rateMatch ? parseInt(rateMatch[1], 10) : null;
+    const isKdvLine = /KDV|K\.D\.V/.test(upper);
+    const isBaseLine = /MATRAH|TOPLAM|TUTAR/.test(upper);
 
-    const amounts = amountsInLine(line).filter((n) => n !== rate);
-    if (amounts.length === 0) continue;
-
-    const entry = map.get(rate) || {};
-    if (/MATRAH/.test(upper)) {
-      // matrah = grondslag; bij twee bedragen is de tweede meestal de KDV.
-      entry.base = amounts[0];
-      if (amounts.length >= 2) entry.amount = amounts[amounts.length - 1];
-    } else {
-      // "KDV %x  bedrag" -> bedrag is het KDV-bedrag voor dit tarief.
-      entry.amount = amounts[amounts.length - 1];
+    if (rate !== null && VALID_VAT_RATES.has(rate)) {
+      // Regel die een tarief introduceert.
+      currentRate = rate;
+      const amounts = amountsInLine(line).filter((n) => n !== rate);
+      const entry = map.get(rate) || {};
+      if (amounts.length >= 2) {
+        // grondslag + KDV op één regel
+        if (entry.base === undefined) entry.base = amounts[0];
+        if (entry.amount === undefined) entry.amount = amounts[amounts.length - 1];
+      } else if (amounts.length === 1) {
+        // Bij "TOPLAM/MATRAH" is het bedrag de grondslag; anders het KDV-bedrag.
+        if (isBaseLine) {
+          if (entry.base === undefined) entry.base = amounts[0];
+        } else if (isKdvLine) {
+          if (entry.amount === undefined) entry.amount = amounts[0];
+        }
+      }
+      map.set(rate, entry);
+    } else if (currentRate !== null && (isKdvLine || isBaseLine)) {
+      // Vervolgregel (zonder eigen %-token) voor het lopende tarief.
+      const amounts = amountsInLine(line);
+      if (amounts.length > 0) {
+        const entry = map.get(currentRate) || {};
+        if (isKdvLine && !isBaseLine && entry.amount === undefined) {
+          entry.amount = amounts[amounts.length - 1];
+        } else if (isBaseLine && !isKdvLine && entry.base === undefined) {
+          entry.base = amounts[amounts.length - 1];
+        }
+        map.set(currentRate, entry);
+        // Tarief afgerond zodra grondslag én KDV bekend zijn.
+        if (entry.base !== undefined && entry.amount !== undefined) {
+          currentRate = null;
+        }
+      }
     }
-    map.set(rate, entry);
   }
 
   const out: VatLineParsed[] = [];
@@ -169,9 +204,14 @@ export function parseReceipt(text: string): ParsedReceipt {
     .map((l) => l.trim())
     .filter(Boolean);
 
-  // Winkelnaam: eerste betekenisvolle regel (met minstens 2 letters).
+  // Winkelnaam: eerste betekenisvolle regel (met minstens 2 letters),
+  // met eventuele losse leestekens aan het begin eraf.
   const merchantLine = lines.find((l) => /[a-zA-ZçğıöşüÇĞİÖŞÜ]{2,}/.test(l));
-  if (merchantLine) result.merchant = merchantLine.slice(0, 120);
+  if (merchantLine) {
+    result.merchant = merchantLine
+      .replace(/^[^0-9A-Za-zçğıöşüÇĞİÖŞÜ]+/, "")
+      .slice(0, 120);
+  }
 
   result.receiptDate = parseReceiptDate(text);
 
